@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo App</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Photo App</h1>
+        </header>
+        
+        <main>
+            <section class="upload-section">
+                <h2>Upload a Photo</h2>
+                <form id="upload-form">
+                    <div class="form-group">
+                        <label for="photo-input">Select a photo:</label>
+                        <input type="file" id="photo-input" accept="image/*" required>
+                    </div>
+                    <div class="preview-container">
+                        <img id="preview-image" src="#" alt="Preview" style="display: none;">
+                    </div>
+                    <button type="submit" id="upload-button">Upload</button>
+                </form>
+                <div id="upload-status" class="status"></div>
+            </section>
+            
+            <section class="photos-section">
+                <h2>Your Photos</h2>
+                <div class="photo-list" id="photo-list">
+                    <p id="no-photos-message">No photos found. Upload some photos to see them here.</p>
+                </div>
+                <div class="photo-detail" id="photo-detail">
+                    <h3 id="photo-detail-title"></h3>
+                    <div class="photo-detail-content">
+                        <img id="photo-detail-image" src="#" alt="Photo">
+                        <div class="photo-detail-info">
+                            <p><strong>File Name:</strong> <span id="photo-detail-filename"></span></p>
+                            <p><strong>Upload Date:</strong> <span id="photo-detail-date"></span></p>
+                            <a id="photo-detail-download" href="#" target="_blank" download>Download Photo</a>
+                        </div>
+                    </div>
+                    <button id="photo-detail-close">Close</button>
+                </div>
+            </section>
+        </main>
+        
+        <footer>
+            <p>&copy; 2023 Photo App</p>
+        </footer>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  photo-app
+  
+  Serverless photo application that enables photo uploads and downloads via API Gateway,
+  stores photos in S3, and metadata in DynamoDB.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    Description: Environment name (dev, test, prod)
+    
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: python3.9
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        PHOTOS_BUCKET_NAME: !Ref PhotosBucket
+        PHOTOS_TABLE_NAME: !Ref PhotosTable
+        PRESIGNED_URL_EXPIRATION: 3600
+
+Resources:
+  # S3 Bucket for storing photos
+  PhotosBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub photo-app-${Environment}-${AWS::AccountId}
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldObjects
+            Status: Enabled
+            ExpirationInDays: 365  # Optional: Delete photos after 1 year
+
+  # DynamoDB table for storing photo metadata
+  PhotosTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub photo-app-photos-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: photoId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: photoId
+          KeyType: HASH
+      SSESpecification:
+        SSEEnabled: true
+
+  # Lambda function for uploading photos
+  UploadPhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/upload_photo/
+      Handler: app.lambda_handler
+      Description: Uploads photos to S3 and stores metadata in DynamoDB
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref PhotosBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PhotosTable
+      Events:
+        UploadAPI:
+          Type: HttpApi
+          Properties:
+            Path: /photos
+            Method: POST
+            ApiId: !Ref HttpApi
+
+  # Lambda function for retrieving photos
+  GetPhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_photo/
+      Handler: app.lambda_handler
+      Description: Retrieves photo metadata and generates pre-signed URL for download
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref PhotosBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref PhotosTable
+      Events:
+        GetAPI:
+          Type: HttpApi
+          Properties:
+            Path: /photos/{photoId}
+            Method: GET
+            ApiId: !Ref HttpApi
+
+  # HTTP API Gateway
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      CorsConfiguration:
+        AllowOrigins:
+          - '*'
+        AllowHeaders:
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+
+Outputs:
+  PhotoAppApi:
+    Description: API Gateway endpoint URL for the photo application
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  
+  UploadPhotoFunction:
+    Description: Upload Photo Lambda Function ARN
+    Value: !GetAtt UploadPhotoFunction.Arn
+  
+  GetPhotoFunction:
+    Description: Get Photo Lambda Function ARN
+    Value: !GetAtt GetPhotoFunction.Arn
+  
+  PhotosBucket:
+    Description: S3 bucket for storing photos
+    Value: !Ref PhotosBucket
+  
+  PhotosTable:
+    Description: DynamoDB table for storing photo metadata
+    Value: !Ref PhotosTable
