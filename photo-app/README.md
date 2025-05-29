@@ -1,197 +1,122 @@
 # Serverless Photo Application
 
-A serverless application for uploading, storing, and retrieving photos using AWS services.
+A serverless application for uploading and retrieving photos using AWS services. This application allows users to upload photos, store them in S3, and retrieve them via pre-signed URLs.
 
 ## Architecture
 
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│             │     │             │     │             │     │             │
-│   Browser   │────▶│  API Gateway│────▶│   Lambda    │────▶│     S3      │
-│             │     │             │     │             │     │             │
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-       ▲                                       │
-       │                                       │
-       │                                       ▼
-       │                               ┌─────────────┐
-       │                               │             │
-       └───────────────────────────────│  DynamoDB   │
-                                       │             │
-                                       └─────────────┘
-```
+![Architecture Diagram](https://via.placeholder.com/800x400?text=Serverless+Photo+App+Architecture)
 
 ### Components
 
-- **Frontend**: HTML/CSS/JavaScript web interface for uploading and viewing photos
-- **API Gateway**: HTTP API with endpoints for uploading and retrieving photos
-- **Lambda Functions**: 
+- **Frontend**: Simple HTML/CSS/JavaScript interface for uploading and retrieving photos
+- **API Gateway**: HTTP API with two endpoints:
+  - `POST /photos`: Upload photo and metadata
+  - `GET /photos/{photoId}`: Download photo via pre-signed URL
+- **Lambda Functions**:
   - `UploadPhotoFunction`: Handles photo uploads, stores in S3, and saves metadata to DynamoDB
   - `GetPhotoFunction`: Retrieves photo metadata from DynamoDB and generates pre-signed URLs for S3 objects
-- **S3**: Stores the uploaded photos securely
-- **DynamoDB**: Stores photo metadata (photoId, fileName, uploadTimestamp, s3Key)
+- **S3**: Private bucket for storing photos
+- **DynamoDB**: Table for storing photo metadata with the following attributes:
+  - `photoId` (Partition Key): Unique identifier for the photo
+  - `fileName`: Original file name of the photo
+  - `uploadTimestamp`: Timestamp when the photo was uploaded
+  - `s3Key`: Key used to store the photo in S3
 
-## Setup Instructions
+## Prerequisites
 
-### Prerequisites
-
+- [AWS Account](https://aws.amazon.com/)
 - [AWS CLI](https://aws.amazon.com/cli/) configured with appropriate credentials
-- [AWS CDK](https://aws.amazon.com/cdk/) installed (`npm install -g aws-cdk`)
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
 - [Python 3.9+](https://www.python.org/downloads/)
-- [Node.js 14+](https://nodejs.org/)
 
-### Deployment Steps
+## Setup and Deployment
 
-1. **Clone the repository**
+### Local Development
 
-   ```bash
+1. Clone the repository:
+   ```
    git clone <repository-url>
    cd photo-app
    ```
 
-2. **Install CDK dependencies**
-
-   ```bash
-   cd cdk
-   pip install -r requirements.txt
-   cd ..
+2. Install dependencies:
+   ```
+   pip install -r src/upload_photo/requirements.txt
+   pip install -r src/get_photo/requirements.txt
    ```
 
-3. **Bootstrap CDK (if not already done)**
-
-   ```bash
-   cdk bootstrap
+3. Run tests:
+   ```
+   python -m pytest tests/unit/
    ```
 
-4. **Deploy the application**
+### Deploy to AWS
 
-   ```bash
-   cdk deploy
+1. Build the application:
+   ```
+   sam build
    ```
 
-   Note the outputs from the deployment, including the API endpoint URL.
+2. Deploy the application:
+   ```
+   sam deploy --guided
+   ```
+   Follow the prompts to deploy the application to your AWS account.
 
-5. **Update the frontend configuration**
-
-   Open `frontend/script.js` and update the `API_ENDPOINT` variable with the API endpoint URL from the deployment outputs.
-
-### Local Development
-
-#### Running the Frontend Locally
-
-1. Navigate to the frontend directory:
-
-   ```bash
-   cd frontend
+3. Note the API Gateway endpoint URL from the deployment outputs:
+   ```
+   PhotosApiEndpoint: https://xxxxxxxxxx.execute-api.region.amazonaws.com/Prod
    ```
 
-2. You can use any local web server to serve the frontend files. For example, with Python:
+### Configure the Frontend
 
-   ```bash
-   python -m http.server 8000
+1. Open `frontend/index.html` in a text editor
+2. Update the `API_ENDPOINT` variable with your API Gateway endpoint URL:
+   ```javascript
+   const API_ENDPOINT = 'https://xxxxxxxxxx.execute-api.region.amazonaws.com/Prod';
    ```
 
-   Then open your browser and navigate to `http://localhost:8000`.
+3. Open the HTML file in a web browser to use the application
 
-#### Testing Lambda Functions Locally
+## Testing the Application
 
-You can use the AWS SAM CLI to test the Lambda functions locally:
+### Local Testing
 
-1. Install AWS SAM CLI:
-
-   ```bash
-   pip install aws-sam-cli
-   ```
-
-2. Start the local API:
-
-   ```bash
-   sam local start-api
-   ```
-
-## API Reference
-
-### Upload Photo
-
-- **Endpoint**: POST /photos
-- **Description**: Uploads a photo and stores its metadata
-- **Request Body**:
-  ```json
-  {
-    "photo": "base64-encoded-photo-data",
-    "fileName": "example.jpg"
-  }
-  ```
-- **Response**:
-  ```json
-  {
-    "photoId": "uuid",
-    "message": "Photo uploaded successfully"
-  }
-  ```
-
-### Get Photo
-
-- **Endpoint**: GET /photos/{photoId}
-- **Description**: Retrieves photo metadata and a pre-signed URL for downloading
-- **Response**:
-  ```json
-  {
-    "photoId": "uuid",
-    "fileName": "example.jpg",
-    "uploadTimestamp": "2023-01-01T12:00:00",
-    "downloadUrl": "https://presigned-url"
-  }
-  ```
-
-## Project Structure
-
+Run unit tests:
 ```
-photo-app/
-├── src/
-│   ├── upload_photo/
-│   │   ├── app.py              # Lambda function for uploading photos
-│   │   └── requirements.txt    # Python dependencies for upload function
-│   ├── get_photo/
-│   │   ├── app.py              # Lambda function for retrieving photos
-│   │   └── requirements.txt    # Python dependencies for get function
-├── tests/
-│   ├── unit/
-│   │   ├── test_upload_photo.py # Unit tests for upload function
-│   │   └── test_get_photo.py    # Unit tests for get function
-├── frontend/
-│   ├── index.html              # HTML frontend
-│   ├── style.css               # CSS styles
-│   └── script.js               # JavaScript for frontend functionality
-├── cdk/
-│   ├── app.py                  # CDK app entry point
-│   ├── photo_app_stack.py      # CDK stack definition
-│   └── requirements.txt        # CDK Python dependencies
-├── template.yaml               # SAM template for local testing
-└── README.md                   # Project documentation
+python -m pytest tests/unit/
 ```
+
+### Manual Testing
+
+1. Open the frontend in a web browser
+2. Upload a photo using the "Upload Photo" section
+3. Copy the Photo ID from the response
+4. Use the "Get Photo" section to retrieve the photo using its ID
 
 ## Security Considerations
 
-- S3 bucket is configured with private access only
-- Pre-signed URLs are used for secure, time-limited access to photos
-- Least-privilege IAM permissions for Lambda functions
-- CORS is configured on the API to allow browser access
+- The S3 bucket is configured as private, and photos are only accessible via pre-signed URLs
+- Lambda functions follow the principle of least privilege with specific IAM permissions
+- API Gateway endpoints can be further secured with authentication mechanisms (not implemented in this demo)
+
+## Optimizations
+
+- Lambda package sizes are kept minimal by only including required dependencies
+- DynamoDB is configured with on-demand capacity for cost optimization
+- S3 lifecycle rules can be configured to delete old photos automatically
 
 ## Assumptions
 
-- Users authenticate through a separate system (not implemented in this demo)
-- Photos are stored for up to one year before automatic deletion
-- Maximum photo size is limited by API Gateway payload limits (10MB)
-- Frontend stores photo IDs in local storage for demonstration purposes
-
-## Future Enhancements
-
-- User authentication and authorization
-- Photo categorization and tagging
-- Image resizing and thumbnail generation
-- Support for photo albums
-- Pagination for retrieving large numbers of photos
+- Photos are assumed to be in common image formats (JPEG, PNG, etc.)
+- The frontend is a simple demonstration and would need enhancements for production use
+- No user authentication is implemented in this demo version
+- The application assumes moderate usage and may need scaling considerations for high traffic
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+[MIT License](LICENSE)
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.

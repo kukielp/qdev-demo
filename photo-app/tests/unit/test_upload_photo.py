@@ -4,173 +4,149 @@ from unittest.mock import patch, MagicMock
 import os
 import sys
 import uuid
-import base64
+from datetime import datetime
 
-# Add the Lambda function directory to the Python path
+# Add the src directory to the path so we can import the app module
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../src/upload_photo'))
 
-# Import the Lambda function
+# Import the app module
 import app
 
-class TestUploadPhotoFunction(unittest.TestCase):
+class TestUploadPhoto(unittest.TestCase):
     """Test cases for the upload_photo Lambda function"""
 
-    @patch('app.s3_client')
+    @patch('app.uuid.uuid4')
+    @patch('app.datetime')
     @patch('app.dynamodb.Table')
-    @patch('uuid.uuid4')
-    def test_successful_upload(self, mock_uuid, mock_table, mock_s3):
+    @patch('app.s3_client.put_object')
+    @patch('app.base64.b64decode')
+    def test_successful_upload(self, mock_b64decode, mock_put_object, mock_table, mock_datetime, mock_uuid):
         """Test successful photo upload"""
         # Mock UUID
-        mock_uuid_value = "12345678-1234-5678-1234-567812345678"
-        mock_uuid.return_value = MagicMock(hex=mock_uuid_value, __str__=lambda self: mock_uuid_value)
+        mock_uuid_value = '12345678-1234-5678-1234-567812345678'
+        mock_uuid.return_value = mock_uuid_value
         
-        # Mock S3 client
-        mock_s3.put_object.return_value = {}
+        # Mock datetime
+        mock_timestamp = '2023-01-01T12:00:00'
+        mock_datetime_instance = MagicMock()
+        mock_datetime_instance.now.return_value.isoformat.return_value = mock_timestamp
+        mock_datetime.return_value = mock_datetime_instance
+        mock_datetime.now.return_value.isoformat.return_value = mock_timestamp
         
-        # Mock DynamoDB table
-        mock_ddb_table = MagicMock()
-        mock_table.return_value = mock_ddb_table
-        mock_ddb_table.put_item.return_value = {}
+        # Mock S3 and DynamoDB
+        mock_put_object.return_value = {}
+        mock_table_instance = MagicMock()
+        mock_table.return_value = mock_table_instance
+        mock_table_instance.put_item.return_value = {}
         
-        # Set environment variables
-        os.environ['PHOTOS_BUCKET_NAME'] = 'test-bucket'
-        os.environ['PHOTOS_TABLE_NAME'] = 'test-table'
+        # Mock base64 decode
+        mock_b64decode.return_value = b'decoded_photo_data'
         
         # Create test event
-        test_photo_data = base64.b64encode(b'test photo data').decode('utf-8')
         test_event = {
             'body': json.dumps({
-                'photo': test_photo_data,
-                'fileName': 'test.jpg'
+                'photo': 'base64encodedphotodata',
+                'fileName': 'test_photo.jpg'
             })
         }
         
-        # Call the Lambda function
+        # Call the lambda handler
         response = app.lambda_handler(test_event, {})
         
-        # Verify response
+        # Assert response
         self.assertEqual(response['statusCode'], 201)
+        
+        # Parse response body
         response_body = json.loads(response['body'])
+        
+        # Assert response body
         self.assertEqual(response_body['photoId'], mock_uuid_value)
-        self.assertEqual(response_body['message'], 'Photo uploaded successfully')
+        self.assertEqual(response_body['fileName'], 'test_photo.jpg')
+        self.assertEqual(response_body['uploadTimestamp'], mock_timestamp)
         
-        # Verify S3 upload was called correctly
-        mock_s3.put_object.assert_called_once_with(
-            Bucket='test-bucket',
-            Key=f"{mock_uuid_value}/test.jpg",
-            Body=base64.b64decode(test_photo_data),
-            ContentType='image/jpg'
+        # Assert S3 upload was called correctly
+        mock_put_object.assert_called_once_with(
+            Bucket=app.BUCKET_NAME,
+            Key=f"{mock_uuid_value}/test_photo.jpg",
+            Body=b'decoded_photo_data',
+            ContentType='image/jpeg'
         )
         
-        # Verify DynamoDB put_item was called correctly
-        mock_ddb_table.put_item.assert_called_once()
-        call_args = mock_ddb_table.put_item.call_args[1]
-        self.assertEqual(call_args['Item']['photoId'], mock_uuid_value)
-        self.assertEqual(call_args['Item']['fileName'], 'test.jpg')
-        self.assertEqual(call_args['Item']['s3Key'], f"{mock_uuid_value}/test.jpg")
-        self.assertIn('uploadTimestamp', call_args['Item'])
+        # Assert DynamoDB put_item was called correctly
+        mock_table_instance.put_item.assert_called_once_with(
+            Item={
+                'photoId': mock_uuid_value,
+                'fileName': 'test_photo.jpg',
+                'uploadTimestamp': mock_timestamp,
+                's3Key': f"{mock_uuid_value}/test_photo.jpg"
+            }
+        )
 
-    @patch('app.s3_client')
-    @patch('app.dynamodb.Table')
-    def test_missing_required_fields(self, mock_table, mock_s3):
-        """Test handling of missing required fields"""
-        # Set environment variables
-        os.environ['PHOTOS_BUCKET_NAME'] = 'test-bucket'
-        os.environ['PHOTOS_TABLE_NAME'] = 'test-table'
-        
-        # Create test event with missing fileName
-        test_event = {
+    def test_missing_required_fields(self):
+        """Test error handling when required fields are missing"""
+        # Test with missing photo
+        test_event_missing_photo = {
             'body': json.dumps({
-                'photo': 'test_photo_data'
+                'fileName': 'test_photo.jpg'
             })
         }
         
-        # Call the Lambda function
-        response = app.lambda_handler(test_event, {})
-        
-        # Verify response
+        response = app.lambda_handler(test_event_missing_photo, {})
         self.assertEqual(response['statusCode'], 400)
-        response_body = json.loads(response['body'])
-        self.assertIn('error', response_body)
+        self.assertIn('Missing required fields', json.loads(response['body'])['error'])
         
-        # Verify S3 and DynamoDB were not called
-        mock_s3.put_object.assert_not_called()
-        mock_table.return_value.put_item.assert_not_called()
-
-    @patch('app.s3_client')
-    @patch('app.dynamodb.Table')
-    def test_s3_upload_error(self, mock_table, mock_s3):
-        """Test handling of S3 upload error"""
-        # Mock S3 client to raise an exception
-        mock_s3.put_object.side_effect = Exception("S3 error")
-        
-        # Set environment variables
-        os.environ['PHOTOS_BUCKET_NAME'] = 'test-bucket'
-        os.environ['PHOTOS_TABLE_NAME'] = 'test-table'
-        
-        # Create test event
-        test_photo_data = base64.b64encode(b'test photo data').decode('utf-8')
-        test_event = {
+        # Test with missing fileName
+        test_event_missing_filename = {
             'body': json.dumps({
-                'photo': test_photo_data,
-                'fileName': 'test.jpg'
+                'photo': 'base64encodedphotodata'
             })
         }
         
-        # Call the Lambda function
-        response = app.lambda_handler(test_event, {})
-        
-        # Verify response
-        self.assertEqual(response['statusCode'], 500)
-        response_body = json.loads(response['body'])
-        self.assertIn('error', response_body)
-        
-        # Verify DynamoDB was not called
-        mock_table.return_value.put_item.assert_not_called()
+        response = app.lambda_handler(test_event_missing_filename, {})
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn('Missing required fields', json.loads(response['body'])['error'])
 
-    @patch('app.s3_client')
-    @patch('app.dynamodb.Table')
-    @patch('uuid.uuid4')
-    def test_dynamodb_error(self, mock_uuid, mock_table, mock_s3):
-        """Test handling of DynamoDB error"""
-        # Mock UUID
-        mock_uuid_value = "12345678-1234-5678-1234-567812345678"
-        mock_uuid.return_value = MagicMock(hex=mock_uuid_value, __str__=lambda self: mock_uuid_value)
+    @patch('app.base64.b64decode')
+    def test_invalid_photo_data(self, mock_b64decode):
+        """Test error handling when photo data is invalid"""
+        # Mock base64 decode to raise an exception
+        mock_b64decode.side_effect = Exception('Invalid base64 data')
         
-        # Mock S3 client
-        mock_s3.put_object.return_value = {}
-        
-        # Mock DynamoDB table to raise an exception
-        mock_ddb_table = MagicMock()
-        mock_table.return_value = mock_ddb_table
-        mock_ddb_table.put_item.side_effect = Exception("DynamoDB error")
-        
-        # Set environment variables
-        os.environ['PHOTOS_BUCKET_NAME'] = 'test-bucket'
-        os.environ['PHOTOS_TABLE_NAME'] = 'test-table'
-        
-        # Create test event
-        test_photo_data = base64.b64encode(b'test photo data').decode('utf-8')
+        # Create test event with invalid photo data
         test_event = {
             'body': json.dumps({
-                'photo': test_photo_data,
-                'fileName': 'test.jpg'
+                'photo': 'invalid_base64_data',
+                'fileName': 'test_photo.jpg'
             })
         }
         
-        # Call the Lambda function
+        # Call the lambda handler
         response = app.lambda_handler(test_event, {})
         
-        # Verify response
-        self.assertEqual(response['statusCode'], 500)
-        response_body = json.loads(response['body'])
-        self.assertIn('error', response_body)
+        # Assert response
+        self.assertEqual(response['statusCode'], 400)
+        self.assertIn('Invalid photo data', json.loads(response['body'])['error'])
+
+    @patch('app.s3_client.put_object')
+    def test_s3_upload_error(self, mock_put_object):
+        """Test error handling when S3 upload fails"""
+        # Mock S3 put_object to raise an exception
+        mock_put_object.side_effect = Exception('S3 upload failed')
         
-        # Verify S3 delete_object was called to clean up
-        mock_s3.delete_object.assert_called_once_with(
-            Bucket='test-bucket',
-            Key=f"{mock_uuid_value}/test.jpg"
-        )
+        # Create test event
+        test_event = {
+            'body': json.dumps({
+                'photo': 'base64encodedphotodata',
+                'fileName': 'test_photo.jpg'
+            })
+        }
+        
+        # Call the lambda handler
+        response = app.lambda_handler(test_event, {})
+        
+        # Assert response
+        self.assertEqual(response['statusCode'], 500)
+        self.assertEqual(json.loads(response['body'])['error'], 'Internal server error')
 
 if __name__ == '__main__':
     unittest.main()

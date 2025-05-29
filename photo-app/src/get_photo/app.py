@@ -1,60 +1,68 @@
 import json
 import os
 import boto3
-import logging
 from botocore.exceptions import ClientError
-
-# Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 
 # Get environment variables
-BUCKET_NAME = os.environ.get('PHOTOS_BUCKET_NAME')
-TABLE_NAME = os.environ.get('PHOTOS_TABLE_NAME')
-URL_EXPIRATION = int(os.environ.get('PRESIGNED_URL_EXPIRATION', '3600'))  # Default 1 hour
+PHOTOS_TABLE = os.environ.get('PHOTOS_TABLE')
+BUCKET_NAME = os.environ.get('PHOTOS_BUCKET')
+URL_EXPIRATION = int(os.environ.get('URL_EXPIRATION', '3600'))  # Default to 1 hour
 
 def lambda_handler(event, context):
     """
-    Lambda function to retrieve photo information and generate a pre-signed URL.
+    Lambda function to handle photo retrieval.
     
     This function:
-    1. Extracts photoId from the path parameter
-    2. Retrieves photo metadata from DynamoDB
-    3. Generates a pre-signed URL for the S3 object
+    1. Receives a photo ID from the path parameter
+    2. Retrieves the photo metadata from DynamoDB
+    3. Generates a pre-signed URL for the photo in S3
+    4. Returns the pre-signed URL and metadata
     
     Args:
         event: API Gateway event
         context: Lambda context
         
     Returns:
-        API Gateway response with photo metadata and pre-signed URL
+        API Gateway response with pre-signed URL and metadata
     """
     try:
-        logger.info("Processing get photo request")
+        # Extract photo ID from path parameters
+        photo_id = event.get('pathParameters', {}).get('photoId')
         
-        # Extract photoId from path parameters
-        if 'pathParameters' not in event or not event['pathParameters'] or 'photoId' not in event['pathParameters']:
-            return build_response(400, {"error": "Missing photoId parameter"})
-            
-        photo_id = event['pathParameters']['photoId']
+        if not photo_id:
+            return {
+                'statusCode': 400,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({'error': 'Missing photoId parameter'})
+            }
         
         # Get photo metadata from DynamoDB
-        table = dynamodb.Table(TABLE_NAME)
+        table = dynamodb.Table(PHOTOS_TABLE)
+        response = table.get_item(
+            Key={
+                'photoId': photo_id
+            }
+        )
         
-        try:
-            response = table.get_item(Key={'photoId': photo_id})
-        except ClientError as e:
-            logger.error(f"Error retrieving item from DynamoDB: {str(e)}")
-            return build_response(500, {"error": "Failed to retrieve photo metadata"})
-            
         # Check if photo exists
         if 'Item' not in response:
-            return build_response(404, {"error": "Photo not found"})
-            
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({'error': 'Photo not found'})
+            }
+        
+        # Get photo metadata
         photo_metadata = response['Item']
         s3_key = photo_metadata['s3Key']
         
@@ -69,39 +77,40 @@ def lambda_handler(event, context):
                 ExpiresIn=URL_EXPIRATION
             )
         except ClientError as e:
-            logger.error(f"Error generating pre-signed URL: {str(e)}")
-            return build_response(500, {"error": "Failed to generate download URL"})
+            return {
+                'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({'error': f'Error generating pre-signed URL: {str(e)}'})
+            }
         
-        # Return photo metadata and pre-signed URL
-        return build_response(200, {
-            "photoId": photo_metadata['photoId'],
-            "fileName": photo_metadata['fileName'],
-            "uploadTimestamp": photo_metadata['uploadTimestamp'],
-            "downloadUrl": presigned_url
-        })
+        # Return success response with pre-signed URL and metadata
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'photoId': photo_metadata['photoId'],
+                'fileName': photo_metadata['fileName'],
+                'uploadTimestamp': photo_metadata['uploadTimestamp'],
+                'downloadUrl': presigned_url
+            })
+        }
         
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        return build_response(500, {"error": "Internal server error"})
-
-def build_response(status_code, body):
-    """
-    Build a standardized API Gateway response
-    
-    Args:
-        status_code: HTTP status code
-        body: Response body
+        # Log the error
+        print(f"Error: {str(e)}")
         
-    Returns:
-        Formatted API Gateway response
-    """
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type"
-        },
-        "body": json.dumps(body)
-    }
+        # Return error response
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({'error': 'Internal server error'})
+        }
